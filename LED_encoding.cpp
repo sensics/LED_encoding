@@ -7,9 +7,9 @@
 void Usage(std::string name)
 {
     std::cout << "Usage: " << name << " [-stride N] [-LEDs N] [-bits N]" << std::endl;
-    std::cout << "       -stride: How many fields to shift between LEDs (default 1)" << std::endl;
-    std::cout << "       -LEDs: How many LEDs are we encoding (default 48)" << std::endl;
-    std::cout << "       -bits: How many bitss to use for encoding (default 6)" << std::endl;
+    std::cout << "       -stride: How many fields to shift between LEDs (default 21)" << std::endl;
+    std::cout << "       -LEDs: How many LEDs are we encoding (default 40)" << std::endl;
+    std::cout << "       -bits: How many bitss to use for encoding (default 8)" << std::endl;
     exit(-1);
 }
 
@@ -122,9 +122,9 @@ void printColumnSums(std::vector<int> sums)
 int main(int argc, char *argv[])
 {
     // Parse the command line to replace default parameters.
-    unsigned int stride = 1;
-    unsigned int LEDs = 48;
-    unsigned int bits = 6;
+    unsigned int stride = 17;
+    unsigned int LEDs = 40;
+    unsigned int bits = 8;
     unsigned int realParams = 0;
     for (size_t i = 1; i < argc; i++) {
         if (std::string("-LEDs") == argv[i]) {
