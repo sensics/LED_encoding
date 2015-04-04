@@ -6,8 +6,10 @@
 
 void Usage(std::string name)
 {
-    std::cout << "Usage: " << name << " [-stride N] [-LEDs N] [-bits N]" << std::endl;
-    std::cout << "       -stride: How many fields to shift between LEDs (default 21)" << std::endl;
+    std::cout << "Usage: " << name << " [-simple_encoding] [-stride N] [-stride_optimize N] [-LEDs N] [-bits N]" << std::endl;
+    std::cout << "       -simple_encoding: Use simple encoding (default not)" << std::endl;
+    std::cout << "       -stride: How many fields to shift between LEDs (default is to optimize)" << std::endl;
+    std::cout << "       -stride_optimize: How many iterations to try optimizing strides (default is 20)" << std::endl;
     std::cout << "       -LEDs: How many LEDs are we encoding (default 40)" << std::endl;
     std::cout << "       -bits: How many bitss to use for encoding (default 8)" << std::endl;
     exit(-1);
@@ -91,14 +93,17 @@ void printTable(std::vector< std::vector<int> > table)
 }
 
 // Compute a vector that is a histogram of column sums
-// for a table.
-std::vector<int> columnSums(std::vector< std::vector<int> > table)
+// for a table.  Optionally, specify the number of rows.
+// If the number of rows is specified as 0, all rows in
+// the table are used.
+std::vector<int> columnSums(std::vector< std::vector<int> > table, size_t nRows = 0)
 {
     std::vector<int> ret;
     size_t rowLength = table[0].size();
+    if (nRows == 0) { nRows = table.size(); }
     for (size_t col = 0; col < rowLength; col++) {
         unsigned brightCount = 0;
-        for (size_t row = 0; row < table.size(); row++) {
+        for (size_t row = 0; row < nRows; row++) {
             if (table[row][col] != 0) {
                 brightCount++;
             }
@@ -106,6 +111,113 @@ std::vector<int> columnSums(std::vector< std::vector<int> > table)
         ret.push_back(brightCount);
     }
     return ret;
+}
+
+void applyFixedStride(int stride, std::vector< std::vector<int> > &table)
+{
+    if (table.size() == 0) { return; }
+
+    size_t rowLength = table[0].size();
+    for (size_t i = 1; i < table.size(); i++) {
+        size_t newFirst = (i * stride) % rowLength;
+        newFirst = rowLength - newFirst;
+        std::rotate(table[i].begin()
+            , table[i].begin() + newFirst
+            , table[i].end());
+    }
+}
+
+// Attempt to rotate the second and following rows such that
+// the maximum number of overlapping bright LEDs in a single
+// column for that row plus all the ones above it is minimized.
+// Repeating this function will select different solutions;
+// it picks the maximum equivalent rotation each time.
+void greedyOptimumStride(std::vector< std::vector<int> > &table)
+{
+    if (table.size() == 0) { return; }
+
+    // Leave the first row un-rotated.
+    // For the following rows, pick the least-rotated choice
+    // with the minimal overlap with previous rows.
+    size_t rowLength = table[0].size();
+    for (size_t i = 1; i < table.size(); i++) {
+        // Record the initial overlap and its index, then
+        // try all of the other ones to see if any are an improvement.
+        // Keep track of the maximum rotation that has the lowest
+        // overlap count.
+        std::vector<int> overlaps = columnSums(table, i+1);
+        int minMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
+        size_t minRotation = 0;
+        for (size_t j = 1; j < rowLength; j++) {
+            std::rotate(table[i].begin()
+                , table[i].begin() + 1
+                , table[i].end());
+
+            overlaps = columnSums(table, i+1);
+            int thisMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
+            if (thisMaxOverlap <= minMaxOverlap) {
+                minMaxOverlap = thisMaxOverlap;
+                minRotation = j;
+            }
+        }
+
+        // Rotate back to the original position.
+        std::rotate(table[i].begin()
+            , table[i].begin() + 1
+            , table[i].end());
+
+        // Rotate by the best amount to reach minimum.
+        if (minRotation != 0) {
+            std::rotate(table[i].begin()
+                , table[i].begin() + minRotation
+                , table[i].end());
+        }
+    }
+}
+
+// Attempt to rotate all rows such that the maximum number of
+// overlapping bright LEDs in a single column is minimized.
+// Repeating this function will select different solutions;
+// it picks the maximum equivalent rotation for each row
+// each time it is run.
+void greedyReduceOverlaps(std::vector< std::vector<int> > &table)
+{
+    if (table.size() == 0) { return; }
+
+    size_t rowLength = table[0].size();
+    for (size_t i = 0; i < table.size(); i++) {
+        // Record the initial overlap and its index, then
+        // try all of the other ones to see if any are an improvement.
+        // Keep track of the maximum rotation that has the lowest
+        // overlap count.
+        std::vector<int> overlaps = columnSums(table);
+        int minMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
+        size_t minRotation = 0;
+        for (size_t j = 1; j < rowLength; j++) {
+            std::rotate(table[i].begin()
+                , table[i].begin() + 1
+                , table[i].end());
+
+            overlaps = columnSums(table);
+            int thisMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
+            if (thisMaxOverlap <= minMaxOverlap) {
+                minMaxOverlap = thisMaxOverlap;
+                minRotation = j;
+            }
+        }
+
+        // Rotate back to the original position.
+        std::rotate(table[i].begin()
+            , table[i].begin() + 1
+            , table[i].end());
+
+        // Rotate by the best amount to reach minimum.
+        if (minRotation != 0) {
+            std::rotate(table[i].begin()
+                , table[i].begin() + minRotation
+                , table[i].end());
+        }
+    }
 }
 
 // Print a vector of column sums
@@ -122,7 +234,8 @@ void printColumnSums(std::vector<int> sums)
 int main(int argc, char *argv[])
 {
     // Parse the command line to replace default parameters.
-    unsigned int stride = 17;
+    int stride = -1;
+    unsigned stride_optimizations = 20;
     unsigned int LEDs = 40;
     unsigned int bits = 8;
     unsigned int realParams = 0;
@@ -138,6 +251,12 @@ int main(int argc, char *argv[])
                 Usage(argv[0]);
             }
             stride = atoi(argv[i]);
+        }
+        else if (std::string("-stride_optimize") == argv[i]) {
+            if (++i >= argc) {
+                Usage(argv[0]);
+            }
+            stride_optimizations = atoi(argv[i]);
         }
         else if (std::string("-bits") == argv[i]) {
             if (++i >= argc) {
@@ -183,13 +302,20 @@ int main(int argc, char *argv[])
         << *std::max_element(sums.begin(), sums.end()) << std::endl;
 
     // Shift the encodings based on the requested stride between elements.
-    size_t rowLength = encodingTable[0].size();
-    for (size_t i = 0; i < LEDs; i++) {
-        size_t newFirst = (i * stride) % rowLength;
-        newFirst = rowLength - newFirst;
-        std::rotate(encodingTable[i].begin()
-            , encodingTable[i].begin() + newFirst
-            , encodingTable[i].end());
+    // If the stride is negative, we do a greedy optimization, optionally
+    // followed by repeated attempts to improve it.
+    // If the stride is >=0, we use it consistently across the board.
+    if (stride >= 0) {
+        applyFixedStride(stride, encodingTable);
+    }
+    else {
+        greedyOptimumStride(encodingTable);
+    }
+
+    // Try to find better strides by shifting each row by the maximum
+    // stride that doesn't make things worse.
+    for (size_t i = 0; i < stride_optimizations; i++) {
+        greedyReduceOverlaps(encodingTable);
     }
 
     // Print the shifted table.
