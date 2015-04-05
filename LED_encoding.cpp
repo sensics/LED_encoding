@@ -6,12 +6,13 @@
 
 void Usage(std::string name)
 {
-    std::cout << "Usage: " << name << " [-simple_encoding] [-stride N] [-stride_optimize N] [-LEDs N] [-bits N]" << std::endl;
+    std::cout << "Usage: " << name << " [-simple_encoding] [-parity N] [-stride N] [-stride_optimize N] [-LEDs N] [-bits N]" << std::endl;
     std::cout << "       -simple_encoding: Use simple encoding (default not)" << std::endl;
+    std::cout << "       -parity: For non-simple encoding, use even (2), odd (1) or no (0) parity (default 2)" << std::endl;
     std::cout << "       -stride: How many fields to shift between LEDs (default is to optimize)" << std::endl;
     std::cout << "       -stride_optimize: How many iterations to try optimizing strides (default is 20)" << std::endl;
     std::cout << "       -LEDs: How many LEDs are we encoding (default 40)" << std::endl;
-    std::cout << "       -bits: How many bitss to use for encoding (default 8)" << std::endl;
+    std::cout << "       -bits: How many bitss to use for encoding (default 10)" << std::endl;
     exit(-1);
 }
 
@@ -69,6 +70,112 @@ std::vector<int> encodePattern(unsigned int ID, size_t bits)
     ret.push_back(0);
     ret.push_back(0);
 
+    return ret;
+}
+
+// Returns true if the test vector is not the same as any of the
+// vectors already in the table for any rotation of the test vector.
+bool isRotationallyInvariant(std::vector<int> testVec, const std::vector< std::vector<int> > &table)
+{
+    // If any of the rotations match, return false.
+    for (size_t r = 0; r < testVec.size(); r++) {
+        for (size_t t = 0; t < table.size(); t++) {
+            if (testVec == table[t]) { return false; }
+        }
+        std::rotate(testVec.begin()
+            , testVec.begin() + 1
+            , testVec.end());
+    }
+    return true;
+}
+
+// Recursively construct all of the rotationally-invariant b-bit patterns with
+// "ones" of the bits being 1.  It is called with the number of 1 bits remaining
+// to be filled in, the first location where it is legal to put a 1 bit, and
+// a vector of the encoding size filled with 0's.
+void recursiveRotationallyInvariant(
+    std::vector< std::vector<int> > &table  // The table we're filling in with results
+    , std::vector<int> testVec              // The vector we're building to test
+    , size_t ones                           // How many 1's we have left to add
+    , size_t first                          // The first location we can put a 1
+    )
+{
+    // How many bits are we using to encode?
+    size_t bits = testVec.size();
+
+    // Have we filled in all of our 1's?  If so, check our guess against the
+    // current ones to see if it is rotationally symmetric with any of them.
+    // If not, add it to the list.  In any case, return because we're done.
+    if (ones == 0) {
+        if (isRotationallyInvariant(testVec, table)) {
+            table.push_back(testVec);
+        }
+        return;
+    }
+
+    // Try adding a 1 in all of the possible locations (leaving room for the
+    // remainder of the bits) and recursing with one fewer bit.  Then remove
+    // the 1 from where we put it.
+    for (size_t i = first; i + ones <= bits; i++) {
+        testVec[i] = 1;
+        recursiveRotationallyInvariant(table, testVec, ones - 1, i + 1);
+        testVec[i] = 0;
+    }
+}
+
+// Construct all of the rotationally-invariant b-bit patterns with
+// "ones" of the bits being 1.
+std::vector< std::vector<int> > constructRotationallyInvariant(size_t ones, size_t bits)
+{
+    // Construct an empty table to pass to the recursive function.
+    std::vector< std::vector<int> > ret;
+
+    // Construct a vector of all 0's to send to the recursive function.
+    std::vector<int> zeroVector;
+    for (size_t i = 0; i < bits; i++) {
+        zeroVector.push_back(0);
+    }
+    recursiveRotationallyInvariant(ret, zeroVector, ones, 0);
+    return ret;
+}
+
+// Find an optimal encoding for 'LEDs' count of LEDs in 'bits' bits.
+// It starts with the smallest number of "1" bits and includes all
+// encodings with that number of bits that are not rotationally
+// symmetric with each other, then moves up to a larger number of
+// "1" bits until it has found enough values to encode the requested
+// number of LEDs.
+//   The parity can be specified as 0 (none), 1 (odd), or 2 (even).
+// If specified, only patterns with the designated parity will be
+// included.
+//   Returns an empty vector if it cannot find enough encodings
+// matching the specified constraints.
+std::vector< std::vector<int> > greedyOptimalEncode(size_t LEDs, size_t bits, unsigned parity)
+{
+    std::vector< std::vector<int> > ret;
+    if (LEDs == 0) { return ret; }
+
+    for (size_t b = 1; b <= bits; b++) {
+        // Make sure our parity matches that specified
+        if ( ((parity == 1) && (b % 2 != 1)) ||
+             ((parity == 2) && (b % 2 != 0)) ) {
+            continue;
+        }
+
+        // Construct all of the b-bit patterns that are not rotationally
+        // symmetric with one another.  Add them to the list.  If we
+        // fill up all the ones we need, return.
+        std::vector< std::vector<int> > bBitPatterns =
+            constructRotationallyInvariant(b, bits);
+        for (size_t i = 0; i < bBitPatterns.size(); i++) {
+            ret.push_back(bBitPatterns[i]);
+            if (ret.size() == LEDs) { return ret; }
+        }
+    }
+
+    // We cannot succeed because we don't have enough bits, so return an empty
+    // result.
+    ret.clear();
     return ret;
 }
 
@@ -237,7 +344,9 @@ int main(int argc, char *argv[])
     int stride = -1;
     unsigned stride_optimizations = 20;
     unsigned int LEDs = 40;
-    unsigned int bits = 8;
+    unsigned int bits = 10;
+    bool simple_encoding = false;
+    unsigned parity = 2;    // Even parity by default
     unsigned int realParams = 0;
     for (size_t i = 1; i < argc; i++) {
         if (std::string("-LEDs") == argv[i]) {
@@ -245,6 +354,16 @@ int main(int argc, char *argv[])
                 Usage(argv[0]);
             }
             LEDs = atoi(argv[i]);
+        }
+        else if (std::string("-simple_encoding") == argv[i]) {
+            simple_encoding = true;
+        }
+        else if (std::string("-parity") == argv[i]) {
+            if (++i >= argc) {
+                Usage(argv[0]);
+            }
+            parity = atoi(argv[i]);
+            if (parity > 2) { Usage(argv[0]); }
         }
         else if (std::string("-stride") == argv[i]) {
             if (++i >= argc) {
@@ -284,8 +403,19 @@ int main(int argc, char *argv[])
 
     // Fill a table with the encodings, not shifted.
     std::vector< std::vector<int> > encodingTable;
-    for (unsigned i = 0; i < LEDs; i++) {
-        encodingTable.push_back(encodePattern(i, bits));
+    if (simple_encoding) {
+        for (unsigned i = 0; i < LEDs; i++) {
+            encodingTable.push_back(encodePattern(i, bits));
+        }
+    }
+    else {
+        encodingTable = greedyOptimalEncode(LEDs, bits, parity);
+    }
+
+    // Make sure our construction worked.
+    if (encodingTable.size() == 0) {
+        std::cerr << "Could not construct table with " << bits << " bits for " << LEDs << " LEDs." << std::endl;
+        return -3;
     }
 
     // Print the unshifted table.
