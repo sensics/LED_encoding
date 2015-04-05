@@ -301,6 +301,8 @@ void greedyOptimumStride(std::vector< std::vector<int> > &table)
 
 // Attempt to rotate all rows such that the maximum number of
 // overlapping bright LEDs in a single column is minimized.
+// It also attempts to maximize the minimum maximum count over
+// all columns, to try and level the number of 1's per column.
 // Repeating this function will select different solutions;
 // it picks the maximum equivalent rotation for each row
 // each time it is run.
@@ -313,9 +315,11 @@ void greedyReduceOverlaps(std::vector< std::vector<int> > &table)
         // Record the initial overlap and its index, then
         // try all of the other ones to see if any are an improvement.
         // Keep track of the maximum rotation that has the lowest
-        // overlap count.
+        // maximum overlap count and, within that, the largest
+        // minimum overlap count.
         std::vector<int> overlaps = columnSums(table);
         int minMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
+        int maxMinOverlap = *std::min_element(overlaps.begin(), overlaps.end());
         size_t minRotation = 0;
         for (size_t j = 1; j < rowLength; j++) {
             std::rotate(table[i].begin()
@@ -324,8 +328,15 @@ void greedyReduceOverlaps(std::vector< std::vector<int> > &table)
 
             overlaps = columnSums(table);
             int thisMaxOverlap = *std::max_element(overlaps.begin(), overlaps.end());
-            if (thisMaxOverlap <= minMaxOverlap) {
+            int thisMinOverlap = *std::min_element(overlaps.begin(), overlaps.end());
+            if (thisMaxOverlap < minMaxOverlap) {
                 minMaxOverlap = thisMaxOverlap;
+                maxMinOverlap = thisMinOverlap;
+                minRotation = j;
+            }
+            if ((thisMaxOverlap == minMaxOverlap) && (thisMinOverlap >= maxMinOverlap)) {
+                minMaxOverlap = thisMaxOverlap;
+                maxMinOverlap = thisMinOverlap;
                 minRotation = j;
             }
         }
@@ -451,6 +462,12 @@ int main(int argc, char *argv[])
     // Compute and print the maximum instantaneous brightness.
     std::cout << std::endl << "Maximum brightness: "
         << *std::max_element(sums.begin(), sums.end()) << std::endl;
+
+    // Reverse the order of the elements to put the ones with the most
+    // bits first.  This will mean that we pack the hardest ones first
+    // and have a better chance of "filling in" loose slots later,
+    // producing a more compact packing.
+    std::reverse(encodingTable.begin(), encodingTable.end());
 
     // Shift the encodings based on the requested stride between elements.
     // If the stride is negative, we do a greedy optimization, optionally
