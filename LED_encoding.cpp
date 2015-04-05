@@ -461,4 +461,18 @@ int main(int argc, char *argv[])
     std::cout << std::endl << "Maximum brightness: "
         << *std::max_element(sums.begin(), sums.end())
         << std::endl << std::endl;
+
+    // Count up all of the 1's and compute how many (at minimum)
+    // must be lined up in a single column given the number of bits,
+    // irrespective of the rotationally-invariant coding or packing
+    // rotation chosen.
+    int numOnes = 0;
+    for (size_t i = 0; i < sums.size(); i++) {
+        numOnes += sums[i];
+    }
+    int minOnes = numOnes / bits;
+    if (numOnes % bits != 0) {
+        minOnes++;
+    }
+    std::cout << "Theoretical minimum for packing this many 1's: " << minOnes << std::endl;
 }
