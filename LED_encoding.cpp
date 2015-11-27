@@ -3,10 +3,11 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <sstream>
 
 void Usage(std::string name)
 {
-    std::cout << "Usage: " << name << " [-simple_encoding] [-parity N] [-stride N] [-stride_optimize N] [-LEDs N] [-bits N] [-csv]" << std::endl;
+    std::cout << "Usage: " << name << " [-simple_encoding] [-parity N] [-stride N] [-stride_optimize N] [-LEDs N] [-bits N] [-csv] [-array [L]]" << std::endl;
     std::cout << "       -simple_encoding: Use simple encoding (default not)" << std::endl;
     std::cout << "       -parity: For non-simple encoding, use even (2), odd (1) or no (0) parity (default 2)" << std::endl;
     std::cout << "       -stride: How many fields to shift between LEDs (default is to optimize)" << std::endl;
@@ -14,6 +15,7 @@ void Usage(std::string name)
     std::cout << "       -LEDs: How many LEDs are we encoding (default 40)" << std::endl;
     std::cout << "       -bits: How many bitss to use for encoding (default 10)" << std::endl;
     std::cout << "       -csv: Also print the table as comma-separated-values" << std::endl;
+    std::cout << "       -array: Also print a C-style array, optionally specifying empty LED driver outputs using a comma-separated list" << std::endl;
     exit(-1);
 }
 
@@ -216,6 +218,27 @@ void printTableCSV(std::vector< std::vector<int> > table)
     }
 }
 
+// Print out an encoding table as a decimal array.
+void printTableArray(std::vector< std::vector<int> > table)
+{
+    size_t rowLength = table[0].size();
+    for (size_t col = 0; col < rowLength; col++) {
+        int code = 0;
+        std::cout << "{";
+        for (size_t row = table.size() - 1; row < table.size(); row--) {
+            code |= table[row][col] << (row % 8);
+            if (row % 8 == 0)
+            {
+                std::cout << code;
+                code = 0;
+                if (row > 0)
+                    std::cout << ",";
+            }
+        }
+        std::cout << "}," << std::endl;
+    }
+}
+
 // Compute a vector that is a histogram of column sums
 // for a table.  Optionally, specify the number of rows.
 // If the number of rows is specified as 0, all rows in
@@ -376,7 +399,9 @@ int main(int argc, char *argv[])
     bool simple_encoding = false;
     unsigned parity = 2;    // Even parity by default
     bool print_CSV = false;
+    bool print_array = false;
     unsigned int realParams = 0;
+    std::vector<int> skip;
     for (size_t i = 1; i < argc; i++) {
         if (std::string("-LEDs") == argv[i]) {
             if (++i >= argc) {
@@ -389,6 +414,18 @@ int main(int argc, char *argv[])
         }
         else if (std::string("-csv") == argv[i]) {
             print_CSV = true;
+        }
+        else if (std::string("-array") == argv[i]) {
+            print_array = true;
+
+            // Optional parameter
+            if (++i < argc && argv[i][0] != '-') {
+                std::stringstream leds(argv[i]);
+                std::string segment;
+
+                while (std::getline(leds, segment, ','))
+                    skip.push_back(atoi(segment.c_str()));
+            }
         }
         else if (std::string("-parity") == argv[i]) {
             if (++i >= argc) {
@@ -518,5 +555,17 @@ int main(int argc, char *argv[])
     if (print_CSV) {
         std::cout << "Shifted table: " << std::endl;
         printTableCSV(encodingTable);
+    }
+
+    // Print the C-style array if asked.
+    if (print_array) {
+        // Add empty patterns for empty LED driver outputs.
+        std::vector<int> empty;
+        empty.insert(empty.begin(), bits, 0);
+        for (int i = 0; i < skip.size() && skip[i] < encodingTable.size(); i++)
+            encodingTable.insert(encodingTable.begin() + skip[i], empty);
+
+        std::cout << "Firmware array: " << std::endl;
+        printTableArray(encodingTable);
     }
 }
